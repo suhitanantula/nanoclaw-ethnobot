@@ -19,7 +19,7 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
-import { validateAdditionalMounts } from './mount-security.js';
+import { loadMountAllowlist, validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -166,9 +166,18 @@ function buildVolumeMounts(
   });
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
-  if (group.containerConfig?.additionalMounts) {
+  // Merge default mounts (from allowlist) with per-group mounts, deduplicating by hostPath
+  const allowlist = loadMountAllowlist();
+  const defaultMounts = allowlist?.defaultMounts ?? [];
+  const groupMounts = group.containerConfig?.additionalMounts ?? [];
+  const groupHostPaths = new Set(groupMounts.map((m) => m.hostPath));
+  const mergedMounts = [
+    ...groupMounts,
+    ...defaultMounts.filter((m) => !groupHostPaths.has(m.hostPath)),
+  ];
+  if (mergedMounts.length > 0) {
     const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
+      mergedMounts,
       group.name,
       isMain,
     );
@@ -183,7 +192,13 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OPENROUTER_API_KEY',
+    'MINIMAX_API_KEY',
+    'GEMINI_API_KEY',
+  ]);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {

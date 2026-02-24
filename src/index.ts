@@ -1,13 +1,19 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
+  DISCORD_BOT_TOKEN,
+  DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  WHATSAPP_ENABLED,
 } from './config.js';
+import { DiscordChannel } from './channels/discord.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -15,7 +21,6 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -32,7 +37,6 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -78,21 +82,11 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
-  let groupDir: string;
-  try {
-    groupDir = resolveGroupFolderPath(group.folder);
-  } catch (err) {
-    logger.warn(
-      { jid, folder: group.folder, err },
-      'Rejecting group registration with invalid folder',
-    );
-    return;
-  }
-
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
   // Create group folder
+  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   logger.info(
@@ -133,10 +127,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-    return true;
-  }
+  if (!channel) return true;
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
@@ -179,6 +170,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  // WhatsApp auto-clears typing after ~25s, so refresh periodically
+  const typingInterval = setInterval(() => {
+    channel.setTyping?.(chatJid, true)?.catch(() => {});
+  }, 20_000);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -197,15 +192,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
-
     if (result.status === 'error') {
       hadError = true;
     }
   });
 
+  clearInterval(typingInterval);
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
@@ -280,7 +272,6 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
@@ -343,10 +334,7 @@ async function startMessageLoop(): Promise<void> {
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-            continue;
-          }
+          if (!channel) continue;
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
@@ -381,9 +369,7 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true)?.catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-            );
+            channel.setTyping?.(chatJid, true);
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
@@ -416,8 +402,65 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  try {
+    execSync('container system status', { stdio: 'pipe' });
+    logger.debug('Apple Container system already running');
+  } catch {
+    logger.info('Starting Apple Container system...');
+    try {
+      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
+      logger.info('Apple Container system started');
+    } catch (err) {
+      logger.error({ err }, 'Failed to start Apple Container system');
+      console.error(
+        '\n╔════════════════════════════════════════════════════════════════╗',
+      );
+      console.error(
+        '║  FATAL: Apple Container system failed to start                 ║',
+      );
+      console.error(
+        '║                                                                ║',
+      );
+      console.error(
+        '║  Agents cannot run without Apple Container. To fix:           ║',
+      );
+      console.error(
+        '║  1. Install from: https://github.com/apple/container/releases ║',
+      );
+      console.error(
+        '║  2. Run: container system start                               ║',
+      );
+      console.error(
+        '║  3. Restart NanoClaw                                          ║',
+      );
+      console.error(
+        '╚════════════════════════════════════════════════════════════════╝\n',
+      );
+      throw new Error('Apple Container system is required but failed to start');
+    }
+  }
+
+  // Kill and clean up orphaned NanoClaw containers from previous runs
+  try {
+    const output = execSync('container ls --format json', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
+    const orphans = containers
+      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .map((c) => c.configuration.id);
+    for (const name of orphans) {
+      try {
+        execSync(`container stop ${name}`, { stdio: 'pipe' });
+      } catch { /* already stopped */ }
+    }
+    if (orphans.length > 0) {
+      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to clean up orphaned containers');
+  }
 }
 
 async function main(): Promise<void> {
@@ -445,9 +488,19 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Discord (optional)
+  if (DISCORD_BOT_TOKEN) {
+    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
+    channels.push(discord);
+    await discord.connect();
+  }
+
+  // WhatsApp (optional - disabled when DISCORD_ONLY=true or WHATSAPP_ENABLED=false)
+  if (!DISCORD_ONLY && WHATSAPP_ENABLED !== false) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -457,10 +510,7 @@ async function main(): Promise<void> {
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
-      if (!channel) {
-        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
-        return;
-      }
+      if (!channel) return;
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
@@ -479,10 +529,7 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
+  startMessageLoop();
 }
 
 // Guard: only run when executed directly, not when imported by tests

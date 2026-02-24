@@ -188,7 +188,13 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENROUTER_API_KEY',
+  'MINIMAX_API_KEY',
+  'GEMINI_API_KEY',
+];
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -417,6 +423,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: process.env.NANOCLAW_MODEL || 'claude-sonnet-4-20250514',
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -446,6 +453,9 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            ...(sdkEnv.OPENROUTER_API_KEY ? { OPENROUTER_API_KEY: sdkEnv.OPENROUTER_API_KEY } : {}),
+            ...(sdkEnv.MINIMAX_API_KEY ? { MINIMAX_API_KEY: sdkEnv.MINIMAX_API_KEY } : {}),
+            ...(sdkEnv.GEMINI_API_KEY ? { GEMINI_API_KEY: sdkEnv.GEMINI_API_KEY } : {}),
           },
         },
       },

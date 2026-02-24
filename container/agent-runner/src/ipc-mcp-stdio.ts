@@ -280,6 +280,276 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+// ---------------------------------------------------------------------------
+// Multi-model AI tools
+// ---------------------------------------------------------------------------
+
+interface ModelConfig {
+  id: string;
+  provider: 'openrouter' | 'minimax' | 'gemini';
+  name: string;
+}
+
+const MODELS: Record<string, ModelConfig> = {
+  kimi: { id: 'moonshotai/kimi-k2', provider: 'openrouter', name: 'Kimi K2' },
+  minimax: { id: 'MiniMax-M1-80k', provider: 'minimax', name: 'Minimax M1' },
+  gemini: { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini 2.5 Flash' },
+};
+
+const FALLBACK_CHAIN: ModelConfig[] = [
+  MODELS.minimax,
+  MODELS.kimi,
+];
+
+function getProviderKey(provider: ModelConfig['provider']): string | undefined {
+  switch (provider) {
+    case 'openrouter': return process.env.OPENROUTER_API_KEY;
+    case 'minimax': return process.env.MINIMAX_API_KEY;
+    case 'gemini': return process.env.GEMINI_API_KEY;
+  }
+}
+
+async function callOpenAICompatible(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+): Promise<string> {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages,
+      max_tokens: maxTokens,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content || '(empty response)';
+}
+
+async function callGemini(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  maxTokens: number,
+): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '(empty response)';
+}
+
+async function queryModel(
+  model: ModelConfig,
+  prompt: string,
+  systemPrompt: string | undefined,
+  maxTokens: number,
+): Promise<string> {
+  const key = getProviderKey(model.provider);
+  if (!key) throw new Error(`No API key for ${model.provider}`);
+
+  switch (model.provider) {
+    case 'openrouter': {
+      const messages: Array<{ role: string; content: string }> = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+      return callOpenAICompatible('https://openrouter.ai/api/v1', key, model.id, messages, maxTokens);
+    }
+    case 'minimax': {
+      const messages: Array<{ role: string; content: string }> = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+      return callOpenAICompatible('https://api.minimaxi.chat/v1', key, model.id, messages, maxTokens);
+    }
+    case 'gemini': {
+      const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+      return callGemini(key, model.id, fullPrompt, maxTokens);
+    }
+  }
+}
+
+function resolveModel(name?: string): ModelConfig | null {
+  if (!name) return null;
+  const lower = name.toLowerCase().trim();
+  if (MODELS[lower]) return MODELS[lower];
+  // Fuzzy match
+  for (const [key, config] of Object.entries(MODELS)) {
+    if (config.name.toLowerCase().includes(lower) || key.includes(lower)) {
+      return config;
+    }
+  }
+  return null;
+}
+
+server.tool(
+  'ai_query',
+  `Query an external AI model (Kimi K2, Minimax, Gemini). Use this when you need a second opinion, brainstorming, or to offload work to another model.
+
+Available models:
+• kimi — Kimi K2 (via OpenRouter). Best for ideation, brainstorming, creative angles.
+• minimax — Minimax M1. Best for code generation overflow.
+• gemini — Gemini 2.5 Flash. Best for research, factual queries, summarization.
+
+If no model is specified, uses the fallback chain (minimax → kimi) to find one with a configured API key.`,
+  {
+    prompt: z.string().describe('The prompt to send to the external model'),
+    model: z.string().optional().describe('Model name: "kimi", "minimax", or "gemini". Omit for auto-select.'),
+    system_prompt: z.string().optional().describe('Optional system prompt for the model'),
+    max_tokens: z.number().optional().default(4096).describe('Max response tokens (default 4096)'),
+  },
+  async (args) => {
+    let model = resolveModel(args.model);
+
+    // Auto-select: use fallback chain
+    if (!model) {
+      for (const candidate of FALLBACK_CHAIN) {
+        if (getProviderKey(candidate.provider)) {
+          model = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!model) {
+      return {
+        content: [{ type: 'text' as const, text: 'No AI model available. Configure OPENROUTER_API_KEY, MINIMAX_API_KEY, or GEMINI_API_KEY.' }],
+        isError: true,
+      };
+    }
+
+    // Check key exists for selected model
+    if (!getProviderKey(model.provider)) {
+      return {
+        content: [{ type: 'text' as const, text: `No API key configured for ${model.name} (${model.provider}). Set the corresponding key in .env.` }],
+        isError: true,
+      };
+    }
+
+    try {
+      const result = await queryModel(model, args.prompt, args.system_prompt, args.max_tokens || 4096);
+      return {
+        content: [{ type: 'text' as const, text: `[${model.name}]\n\n${result}` }],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `Error calling ${model.name}: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'ai_image',
+  `Generate an image using Gemini's image generation. Requires GEMINI_API_KEY.
+
+Returns the image as base64. Use for diagrams, illustrations, mockups, or any visual content.`,
+  {
+    prompt: z.string().describe('Description of the image to generate'),
+  },
+  async (args) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return {
+        content: [{ type: 'text' as const, text: 'No GEMINI_API_KEY configured. Set it in .env to use image generation.' }],
+        isError: true,
+      };
+    }
+
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: args.prompt }] }],
+          generationConfig: {
+            responseModalities: ['TEXT', 'IMAGE'],
+          },
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+      }
+
+      const data = await res.json() as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              text?: string;
+              inlineData?: { mimeType: string; data: string };
+            }>;
+          };
+        }>;
+      };
+
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const contents: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
+
+      for (const part of parts) {
+        if (part.text) {
+          contents.push({ type: 'text' as const, text: part.text });
+        }
+        if (part.inlineData) {
+          contents.push({
+            type: 'image' as const,
+            data: part.inlineData.data,
+            mimeType: part.inlineData.mimeType,
+          });
+        }
+      }
+
+      if (contents.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No image generated. Try a more descriptive prompt.' }],
+        };
+      }
+
+      return { content: contents };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `Error generating image: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
