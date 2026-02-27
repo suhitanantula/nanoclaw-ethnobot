@@ -13,6 +13,12 @@ const envConfig = readEnvFile([
   'WHATSAPP_ENABLED',
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
+  'WHISPER_ENABLED',
+  'WHISPER_MODEL',
+  'VOICE_ENABLED',
+  'DEEPGRAM_API_KEY',
+  'OPENAI_API_KEY',
+  'VOICE_TTS_VOICE',
 ]);
 
 export const ASSISTANT_NAME =
@@ -80,3 +86,19 @@ export const DISCORD_BOT_TOKEN =
   process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 export const DISCORD_ONLY =
   (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
+
+// Whisper transcription
+export const WHISPER_ENABLED =
+  (process.env.WHISPER_ENABLED || envConfig.WHISPER_ENABLED) !== 'false';
+export const WHISPER_MODEL =
+  process.env.WHISPER_MODEL || envConfig.WHISPER_MODEL || 'base';
+
+// Voice (Discord real-time voice channel interaction)
+export const VOICE_ENABLED =
+  (process.env.VOICE_ENABLED || envConfig.VOICE_ENABLED) === 'true';
+export const DEEPGRAM_API_KEY =
+  process.env.DEEPGRAM_API_KEY || envConfig.DEEPGRAM_API_KEY || '';
+export const OPENAI_API_KEY =
+  process.env.OPENAI_API_KEY || envConfig.OPENAI_API_KEY || '';
+export const VOICE_TTS_VOICE =
+  process.env.VOICE_TTS_VOICE || envConfig.VOICE_TTS_VOICE || 'alloy';

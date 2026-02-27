@@ -286,7 +286,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 interface ModelConfig {
   id: string;
-  provider: 'openrouter' | 'minimax' | 'gemini';
+  provider: 'openrouter' | 'minimax' | 'gemini' | 'glm';
   name: string;
 }
 
@@ -294,11 +294,14 @@ const MODELS: Record<string, ModelConfig> = {
   kimi: { id: 'moonshotai/kimi-k2', provider: 'openrouter', name: 'Kimi K2' },
   minimax: { id: 'MiniMax-M1-80k', provider: 'minimax', name: 'Minimax M1' },
   gemini: { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini 2.5 Flash' },
+  glm: { id: 'glm-4.7', provider: 'glm', name: 'GLM-4.7' },
+  'glm-reason': { id: 'glm-5', provider: 'glm', name: 'GLM-5 (Reasoning)' },
 };
 
 const FALLBACK_CHAIN: ModelConfig[] = [
   MODELS.minimax,
   MODELS.kimi,
+  MODELS.glm,
 ];
 
 function getProviderKey(provider: ModelConfig['provider']): string | undefined {
@@ -306,6 +309,7 @@ function getProviderKey(provider: ModelConfig['provider']): string | undefined {
     case 'openrouter': return process.env.OPENROUTER_API_KEY;
     case 'minimax': return process.env.MINIMAX_API_KEY;
     case 'gemini': return process.env.GEMINI_API_KEY;
+    case 'glm': return process.env.GLM_API_KEY;
   }
 }
 
@@ -395,6 +399,12 @@ async function queryModel(
       const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
       return callGemini(key, model.id, fullPrompt, maxTokens);
     }
+    case 'glm': {
+      const messages: Array<{ role: string; content: string }> = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+      return callOpenAICompatible('https://open.bigmodel.cn/api/paas/v4', key, model.id, messages, maxTokens);
+    }
   }
 }
 
@@ -413,17 +423,19 @@ function resolveModel(name?: string): ModelConfig | null {
 
 server.tool(
   'ai_query',
-  `Query an external AI model (Kimi K2, Minimax, Gemini). Use this when you need a second opinion, brainstorming, or to offload work to another model.
+  `Query an external AI model (Kimi K2, Minimax, Gemini, GLM-4.7, GLM-5). Use this when you need a second opinion, brainstorming, or to offload work to another model.
 
 Available models:
 • kimi — Kimi K2 (via OpenRouter). Best for ideation, brainstorming, creative angles.
 • minimax — Minimax M1. Best for code generation overflow.
 • gemini — Gemini 2.5 Flash. Best for research, factual queries, summarization.
+• glm — GLM-4.7 (ZhipuAI). Best for research, analysis, knowledge tasks.
+• glm-reason — GLM-5 Reasoning (ZhipuAI). Best for complex reasoning, math, logic.
 
-If no model is specified, uses the fallback chain (minimax → kimi) to find one with a configured API key.`,
+If no model is specified, uses the fallback chain (minimax → kimi → glm) to find one with a configured API key.`,
   {
     prompt: z.string().describe('The prompt to send to the external model'),
-    model: z.string().optional().describe('Model name: "kimi", "minimax", or "gemini". Omit for auto-select.'),
+    model: z.string().optional().describe('Model name: "kimi", "minimax", "gemini", "glm", or "glm-reason". Omit for auto-select.'),
     system_prompt: z.string().optional().describe('Optional system prompt for the model'),
     max_tokens: z.number().optional().default(4096).describe('Max response tokens (default 4096)'),
   },
@@ -442,7 +454,7 @@ If no model is specified, uses the fallback chain (minimax → kimi) to find one
 
     if (!model) {
       return {
-        content: [{ type: 'text' as const, text: 'No AI model available. Configure OPENROUTER_API_KEY, MINIMAX_API_KEY, or GEMINI_API_KEY.' }],
+        content: [{ type: 'text' as const, text: 'No AI model available. Configure OPENROUTER_API_KEY, MINIMAX_API_KEY, GEMINI_API_KEY, or GLM_API_KEY.' }],
         isError: true,
       };
     }

@@ -199,6 +199,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+
+        // Also speak via TTS if voice is active for this channel
+        if (channel instanceof DiscordChannel) {
+          const guildId = channel.getVoiceGuildForJid(chatJid);
+          if (guildId) {
+            channel.speakInVoice(guildId, text).catch((err) =>
+              logger.error({ err }, 'Voice TTS failed'),
+            );
+          }
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();

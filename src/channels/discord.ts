@@ -1,13 +1,25 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import {
+  ChatInputCommandInteraction,
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  TextChannel,
+} from 'discord.js';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN, VOICE_ENABLED } from '../config.js';
 import { logger } from '../logger.js';
+import { generateSpeech } from '../tts.js';
 import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+import { DiscordVoiceHandler } from './discord-voice.js';
 
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
@@ -21,6 +33,9 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  private voiceHandler: DiscordVoiceHandler | null = null;
+  // Map guildId → text channelId where /join was issued (for routing responses)
+  private voiceTextChannels = new Map<string, string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -34,6 +49,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildVoiceStates,
       ],
     });
 
@@ -151,13 +167,64 @@ export class DiscordChannel implements Channel {
       );
     });
 
+    // Voice handler setup (when VOICE_ENABLED)
+    if (VOICE_ENABLED) {
+      this.voiceHandler = new DiscordVoiceHandler((userId, guildId, text) => {
+        // Route transcribed speech as a regular message through the pipeline
+        const textChannelId = this.voiceTextChannels.get(guildId);
+        if (!textChannelId) return;
+
+        const chatJid = `dc:${textChannelId}`;
+        const timestamp = new Date().toISOString();
+
+        // Prepend trigger so the agent picks it up
+        const content = `@${ASSISTANT_NAME} ${text}`;
+
+        // Store chat metadata
+        this.opts.onChatMetadata(chatJid, timestamp);
+
+        const group = this.opts.registeredGroups()[chatJid];
+        if (!group) return;
+
+        // Resolve display name from guild member cache
+        const guild = this.client?.guilds.cache.get(guildId);
+        const member = guild?.members.cache.get(userId);
+        const senderName = member?.displayName || `User:${userId}`;
+
+        this.opts.onMessage(chatJid, {
+          id: `voice-${Date.now()}-${userId}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content,
+          timestamp,
+          is_from_me: false,
+        });
+
+        logger.info({ userId, guildId, senderName, text: text.slice(0, 100) }, 'Voice message routed');
+      });
+
+      // Handle /join and /leave slash commands
+      this.client.on(Events.InteractionCreate, async (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+
+        if (interaction.commandName === 'join') {
+          await this.handleJoinCommand(interaction);
+        } else if (interaction.commandName === 'leave') {
+          await this.handleLeaveCommand(interaction);
+        }
+      });
+
+      logger.info('Discord voice support enabled');
+    }
+
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
     return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
+      this.client!.once(Events.ClientReady, async (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',
@@ -166,6 +233,12 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
+
+        // Register slash commands if voice is enabled
+        if (VOICE_ENABLED) {
+          await this.registerSlashCommands(readyClient.user.id);
+        }
+
         resolve();
       });
 
@@ -214,6 +287,10 @@ export class DiscordChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    if (this.voiceHandler) {
+      this.voiceHandler.disconnectAll();
+      this.voiceHandler = null;
+    }
     if (this.client) {
       this.client.destroy();
       this.client = null;
@@ -231,6 +308,102 @@ export class DiscordChannel implements Channel {
       }
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+    }
+  }
+
+  /**
+   * Speak text in the voice channel for a given guild (if connected).
+   */
+  async speakInVoice(guildId: string, text: string): Promise<void> {
+    if (!this.voiceHandler?.isInChannel(guildId)) return;
+    try {
+      const mp3 = await generateSpeech(text);
+      await this.voiceHandler.playAudio(guildId, mp3);
+      logger.debug({ guildId, textLength: text.length }, 'Voice TTS played');
+    } catch (err) {
+      logger.error({ err, guildId }, 'Failed to play TTS in voice channel');
+    }
+  }
+
+  isVoiceActive(guildId: string): boolean {
+    return this.voiceHandler?.isInChannel(guildId) ?? false;
+  }
+
+  getVoiceGuildForJid(jid: string): string | null {
+    const channelId = jid.replace(/^dc:/, '');
+    for (const [guildId, textChannelId] of this.voiceTextChannels) {
+      if (textChannelId === channelId && this.voiceHandler?.isInChannel(guildId)) {
+        return guildId;
+      }
+    }
+    return null;
+  }
+
+  private async handleJoinCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!this.voiceHandler) {
+      await interaction.reply({ content: 'Voice is not enabled.', ephemeral: true });
+      return;
+    }
+
+    const member = interaction.guild?.members.cache.get(interaction.user.id);
+    const voiceChannel = member?.voice.channel;
+
+    if (!voiceChannel) {
+      await interaction.reply({ content: 'You need to be in a voice channel first.', ephemeral: true });
+      return;
+    }
+
+    if (!interaction.guild) {
+      await interaction.reply({ content: 'This command only works in servers.', ephemeral: true });
+      return;
+    }
+
+    try {
+      await interaction.deferReply({ ephemeral: true });
+      await this.voiceHandler.joinChannel(
+        interaction.guild.id,
+        voiceChannel.id,
+        interaction.guild.voiceAdapterCreator,
+      );
+      this.voiceTextChannels.set(interaction.guild.id, interaction.channelId);
+      await interaction.editReply(`Joined **${voiceChannel.name}**. Listening for speech.`);
+      logger.info({ guild: interaction.guild.name, channel: voiceChannel.name }, 'Voice /join');
+    } catch (err) {
+      logger.error({ err }, 'Failed to join voice channel');
+      await interaction.editReply('Failed to join voice channel.').catch(() => {});
+    }
+  }
+
+  private async handleLeaveCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!this.voiceHandler || !interaction.guild) {
+      await interaction.reply({ content: 'Not in a voice channel.', ephemeral: true });
+      return;
+    }
+
+    this.voiceHandler.leaveChannel(interaction.guild.id);
+    this.voiceTextChannels.delete(interaction.guild.id);
+    await interaction.reply({ content: 'Left voice channel.', ephemeral: true });
+    logger.info({ guild: interaction.guild.name }, 'Voice /leave');
+  }
+
+  private async registerSlashCommands(botUserId: string): Promise<void> {
+    const commands = [
+      new SlashCommandBuilder()
+        .setName('join')
+        .setDescription('Join your current voice channel and start listening'),
+      new SlashCommandBuilder()
+        .setName('leave')
+        .setDescription('Leave the voice channel'),
+    ];
+
+    try {
+      const rest = new REST({ version: '10' }).setToken(this.botToken);
+      await rest.put(Routes.applicationCommands(botUserId), {
+        body: commands.map((c) => c.toJSON()),
+      });
+      logger.info('Registered /join and /leave slash commands');
+    } catch (err) {
+      logger.error({ err }, 'Failed to register slash commands');
     }
   }
 }
