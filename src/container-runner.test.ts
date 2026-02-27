@@ -48,6 +48,7 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
+  loadMountAllowlist: vi.fn(() => []),
 }));
 
 // Create a controllable fake ChildProcess

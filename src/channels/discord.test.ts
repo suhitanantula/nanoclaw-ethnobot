@@ -6,6 +6,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  VOICE_ENABLED: false,
+  DEEPGRAM_API_KEY: '',
+  OPENAI_API_KEY: '',
+  VOICE_TTS_VOICE: 'alloy',
+  GROUPS_DIR: '/tmp/test-groups',
 }));
 
 // Mock logger
