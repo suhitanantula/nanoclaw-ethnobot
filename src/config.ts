@@ -3,35 +3,15 @@ import path from 'path';
 import { readEnvFile } from './env.js';
 
 // Read config values from .env (falls back to process.env).
-// Secrets are NOT read here — they stay on disk and are loaded only
-// where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile([
-  'ASSISTANT_NAME',
-  'ASSISTANT_HAS_OWN_NUMBER',
-  'TELEGRAM_ENABLED',
-  'TELEGRAM_BOT_TOKEN',
-  'WHATSAPP_ENABLED',
-  'DISCORD_BOT_TOKEN',
-  'DISCORD_ONLY',
-  'WHISPER_ENABLED',
-  'WHISPER_MODEL',
-  'VOICE_ENABLED',
-  'DEEPGRAM_API_KEY',
-  'OPENAI_API_KEY',
-  'VOICE_TTS_VOICE',
-]);
+// Secrets (API keys, tokens) are NOT read here — they are loaded only
+// by the credential proxy (credential-proxy.ts), never exposed to containers.
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-export const TELEGRAM_ENABLED =
-  (process.env.TELEGRAM_ENABLED || envConfig.TELEGRAM_ENABLED) === 'true';
-export const TELEGRAM_BOT_TOKEN =
-  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
-export const WHATSAPP_ENABLED =
-  (process.env.WHATSAPP_ENABLED || envConfig.WHATSAPP_ENABLED) !== 'false'; // defaults to true
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -66,6 +46,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
@@ -87,24 +71,18 @@ export const TRIGGER_PATTERN = new RegExp(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-// Discord configuration
-export const DISCORD_BOT_TOKEN =
-  process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
-export const DISCORD_ONLY =
-  (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
-
-// Whisper transcription
+// Whisper transcription (read by channel modules that need it)
 export const WHISPER_ENABLED =
-  (process.env.WHISPER_ENABLED || envConfig.WHISPER_ENABLED) !== 'false';
+  (process.env.WHISPER_ENABLED || readEnvFile(['WHISPER_ENABLED']).WHISPER_ENABLED) !== 'false';
 export const WHISPER_MODEL =
-  process.env.WHISPER_MODEL || envConfig.WHISPER_MODEL || 'base';
+  process.env.WHISPER_MODEL || readEnvFile(['WHISPER_MODEL']).WHISPER_MODEL || 'base';
 
 // Voice (Discord real-time voice channel interaction)
 export const VOICE_ENABLED =
-  (process.env.VOICE_ENABLED || envConfig.VOICE_ENABLED) === 'true';
+  (process.env.VOICE_ENABLED || readEnvFile(['VOICE_ENABLED']).VOICE_ENABLED) === 'true';
 export const DEEPGRAM_API_KEY =
-  process.env.DEEPGRAM_API_KEY || envConfig.DEEPGRAM_API_KEY || '';
+  process.env.DEEPGRAM_API_KEY || readEnvFile(['DEEPGRAM_API_KEY']).DEEPGRAM_API_KEY || '';
 export const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY || envConfig.OPENAI_API_KEY || '';
+  process.env.OPENAI_API_KEY || readEnvFile(['OPENAI_API_KEY']).OPENAI_API_KEY || '';
 export const VOICE_TTS_VOICE =
-  process.env.VOICE_TTS_VOICE || envConfig.VOICE_TTS_VOICE || 'alloy';
+  process.env.VOICE_TTS_VOICE || readEnvFile(['VOICE_TTS_VOICE']).VOICE_TTS_VOICE || 'alloy';

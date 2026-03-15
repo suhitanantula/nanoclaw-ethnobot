@@ -4,20 +4,12 @@ import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 
-import {
-  downloadMediaMessage,
-  WAMessage,
-  WASocket,
-} from '@whiskeysockets/baileys';
-
 const execFileAsync = promisify(execFile);
 
 const WHISPER_BIN = process.env.WHISPER_BIN || 'whisper-cli';
 const WHISPER_MODEL =
   process.env.WHISPER_MODEL ||
   path.join(process.cwd(), 'data', 'models', 'ggml-large-v3-turbo.bin');
-
-const FALLBACK_MESSAGE = '[Voice Message - transcription unavailable]';
 
 async function transcribeWithWhisperCpp(
   audioBuffer: Buffer,
@@ -59,47 +51,7 @@ async function transcribeWithWhisperCpp(
   }
 }
 
-export async function transcribeAudioMessage(
-  msg: WAMessage,
-  sock: WASocket,
-): Promise<string | null> {
-  try {
-    const buffer = (await downloadMediaMessage(
-      msg,
-      'buffer',
-      {},
-      {
-        logger: console as any,
-        reuploadRequest: sock.updateMediaMessage,
-      },
-    )) as Buffer;
-
-    if (!buffer || buffer.length === 0) {
-      console.error('Failed to download audio message');
-      return FALLBACK_MESSAGE;
-    }
-
-    console.log(`Downloaded audio message: ${buffer.length} bytes`);
-
-    const transcript = await transcribeWithWhisperCpp(buffer);
-
-    if (!transcript) {
-      return FALLBACK_MESSAGE;
-    }
-
-    console.log(`Transcribed voice message: ${transcript.length} chars`);
-    return transcript.trim();
-  } catch (err) {
-    console.error('Transcription error:', err);
-    return FALLBACK_MESSAGE;
-  }
-}
-
-export function isVoiceMessage(msg: WAMessage): boolean {
-  return msg.message?.audioMessage?.ptt === true;
-}
-
-/** Transcribe an audio file at a given path (used by non-WhatsApp channels). */
+/** Transcribe an audio file at a given path. */
 export async function transcribeAudioFile(
   filePath: string,
 ): Promise<string | null> {
