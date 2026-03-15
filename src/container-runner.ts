@@ -70,6 +70,17 @@ function buildVolumeMounts(
       readonly: true,
     });
 
+    // Shadow .env so the agent cannot read secrets from the mounted project root.
+    // Secrets are passed via stdin instead (see readSecrets()).
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
@@ -212,6 +223,8 @@ function readSecrets(): Record<string, string> {
   return readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
     'OPENROUTER_API_KEY',
     'MINIMAX_API_KEY',
     'GEMINI_API_KEY',

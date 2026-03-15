@@ -24,7 +24,7 @@ import prism from 'prism-media';
 
 import { DEEPGRAM_API_KEY, WHISPER_MODEL } from '../config.js';
 import { logger } from '../logger.js';
-import { transcribeAudio } from '../transcription.js';
+import { transcribeAudioFile } from '../transcription.js';
 
 const SILENCE_DURATION_MS = 800;
 const AUTO_LEAVE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -252,7 +252,7 @@ export class DiscordVoiceHandler {
     const tempPath = path.join(tmpdir(), `voice-${Date.now()}.wav`);
     try {
       await writeFile(tempPath, wavBuffer);
-      return await transcribeAudio(tempPath, WHISPER_MODEL);
+      return await transcribeAudioFile(tempPath);
     } finally {
       rm(tempPath, { force: true }).catch(() => {});
     }

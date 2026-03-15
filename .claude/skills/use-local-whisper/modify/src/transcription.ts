@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const WHISPER_BIN = process.env.WHISPER_BIN || 'whisper-cli';
 const WHISPER_MODEL =
   process.env.WHISPER_MODEL ||
-  path.join(process.cwd(), 'data', 'models', 'ggml-large-v3-turbo.bin');
+  path.join(process.cwd(), 'data', 'models', 'ggml-base.bin');
 
 const FALLBACK_MESSAGE = '[Voice Message - transcription unavailable]';
 
@@ -92,10 +92,4 @@ export async function transcribeAudioMessage(
 
 export function isVoiceMessage(msg: WAMessage): boolean {
   return msg.message?.audioMessage?.ptt === true;
-}
-
-/** Transcribe an audio file at a given path (used by non-WhatsApp channels). */
-export async function transcribeAudioFile(filePath: string): Promise<string | null> {
-  const buffer = fs.readFileSync(filePath);
-  return transcribeWithWhisperCpp(buffer);
 }
