@@ -24,7 +24,13 @@ export async function generateSpeech(
   voice?: string,
 ): Promise<Buffer> {
   const client = getClient();
-  const ttsVoice = (voice || VOICE_TTS_VOICE) as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+  const ttsVoice = (voice || VOICE_TTS_VOICE) as
+    | 'alloy'
+    | 'echo'
+    | 'fable'
+    | 'onyx'
+    | 'nova'
+    | 'shimmer';
 
   logger.debug({ textLength: text.length, voice: ttsVoice }, 'Generating TTS');
 

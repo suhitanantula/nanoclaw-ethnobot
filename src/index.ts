@@ -217,9 +217,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (channel instanceof DiscordChannel) {
           const guildId = channel.getVoiceGuildForJid(chatJid);
           if (guildId) {
-            channel.speakInVoice(guildId, text).catch((err) =>
-              logger.error({ err }, 'Voice TTS failed'),
-            );
+            channel
+              .speakInVoice(guildId, text)
+              .catch((err) => logger.error({ err }, 'Voice TTS failed'));
           }
         }
       }
@@ -503,17 +503,26 @@ function ensureContainerSystemRunning(): void {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
+    const containers: { status: string; configuration: { id: string } }[] =
+      JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter(
+        (c) =>
+          c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'),
+      )
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
         execSync(`container stop ${name}`, { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');

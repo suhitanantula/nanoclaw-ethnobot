@@ -104,18 +104,20 @@ export class DiscordChannel implements Channel {
 
       // Handle attachments — store placeholders so the agent knows something was sent
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
-          } else {
-            return `[File: ${att.name || 'file'}]`;
-          }
-        });
+        const attachmentDescriptions = [...message.attachments.values()].map(
+          (att) => {
+            const contentType = att.contentType || '';
+            if (contentType.startsWith('image/')) {
+              return `[Image: ${att.name || 'image'}]`;
+            } else if (contentType.startsWith('video/')) {
+              return `[Video: ${att.name || 'video'}]`;
+            } else if (contentType.startsWith('audio/')) {
+              return `[Audio: ${att.name || 'audio'}]`;
+            } else {
+              return `[File: ${att.name || 'file'}]`;
+            }
+          },
+        );
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
         } else {
@@ -203,7 +205,10 @@ export class DiscordChannel implements Channel {
           is_from_me: false,
         });
 
-        logger.info({ userId, guildId, senderName, text: text.slice(0, 100) }, 'Voice message routed');
+        logger.info(
+          { userId, guildId, senderName, text: text.slice(0, 100) },
+          'Voice message routed',
+        );
       });
 
       // Handle /join and /leave slash commands
@@ -334,16 +339,24 @@ export class DiscordChannel implements Channel {
   getVoiceGuildForJid(jid: string): string | null {
     const channelId = jid.replace(/^dc:/, '');
     for (const [guildId, textChannelId] of this.voiceTextChannels) {
-      if (textChannelId === channelId && this.voiceHandler?.isInChannel(guildId)) {
+      if (
+        textChannelId === channelId &&
+        this.voiceHandler?.isInChannel(guildId)
+      ) {
         return guildId;
       }
     }
     return null;
   }
 
-  private async handleJoinCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  private async handleJoinCommand(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
     if (!this.voiceHandler) {
-      await interaction.reply({ content: 'Voice is not enabled.', ephemeral: true });
+      await interaction.reply({
+        content: 'Voice is not enabled.',
+        ephemeral: true,
+      });
       return;
     }
 
@@ -351,12 +364,18 @@ export class DiscordChannel implements Channel {
     const voiceChannel = member?.voice.channel;
 
     if (!voiceChannel) {
-      await interaction.reply({ content: 'You need to be in a voice channel first.', ephemeral: true });
+      await interaction.reply({
+        content: 'You need to be in a voice channel first.',
+        ephemeral: true,
+      });
       return;
     }
 
     if (!interaction.guild) {
-      await interaction.reply({ content: 'This command only works in servers.', ephemeral: true });
+      await interaction.reply({
+        content: 'This command only works in servers.',
+        ephemeral: true,
+      });
       return;
     }
 
@@ -368,23 +387,38 @@ export class DiscordChannel implements Channel {
         interaction.guild.voiceAdapterCreator,
       );
       this.voiceTextChannels.set(interaction.guild.id, interaction.channelId);
-      await interaction.editReply(`Joined **${voiceChannel.name}**. Listening for speech.`);
-      logger.info({ guild: interaction.guild.name, channel: voiceChannel.name }, 'Voice /join');
+      await interaction.editReply(
+        `Joined **${voiceChannel.name}**. Listening for speech.`,
+      );
+      logger.info(
+        { guild: interaction.guild.name, channel: voiceChannel.name },
+        'Voice /join',
+      );
     } catch (err) {
       logger.error({ err }, 'Failed to join voice channel');
-      await interaction.editReply('Failed to join voice channel.').catch(() => {});
+      await interaction
+        .editReply('Failed to join voice channel.')
+        .catch(() => {});
     }
   }
 
-  private async handleLeaveCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  private async handleLeaveCommand(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
     if (!this.voiceHandler || !interaction.guild) {
-      await interaction.reply({ content: 'Not in a voice channel.', ephemeral: true });
+      await interaction.reply({
+        content: 'Not in a voice channel.',
+        ephemeral: true,
+      });
       return;
     }
 
     this.voiceHandler.leaveChannel(interaction.guild.id);
     this.voiceTextChannels.delete(interaction.guild.id);
-    await interaction.reply({ content: 'Left voice channel.', ephemeral: true });
+    await interaction.reply({
+      content: 'Left voice channel.',
+      ephemeral: true,
+    });
     logger.info({ guild: interaction.guild.name }, 'Voice /leave');
   }
 

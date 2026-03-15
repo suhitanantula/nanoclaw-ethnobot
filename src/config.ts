@@ -24,7 +24,8 @@ const envConfig = readEnvFile([
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+  (process.env.ASSISTANT_HAS_OWN_NUMBER ||
+    envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const TELEGRAM_ENABLED =
   (process.env.TELEGRAM_ENABLED || envConfig.TELEGRAM_ENABLED) === 'true';
 export const TELEGRAM_BOT_TOKEN =

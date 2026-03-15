@@ -153,7 +153,10 @@ export class DiscordVoiceHandler {
       state.activeUsers.add(userId);
 
       const opusStream = receiver.subscribe(userId, {
-        end: { behavior: EndBehaviorType.AfterSilence, duration: SILENCE_DURATION_MS },
+        end: {
+          behavior: EndBehaviorType.AfterSilence,
+          duration: SILENCE_DURATION_MS,
+        },
       });
 
       // Decode Opus → PCM
@@ -179,9 +182,13 @@ export class DiscordVoiceHandler {
         const pcmBuffer = Buffer.concat(pcmChunks);
 
         // Skip very short segments (< 0.5s of audio)
-        const durationSecs = pcmBuffer.length / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE);
+        const durationSecs =
+          pcmBuffer.length / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE);
         if (durationSecs < 0.5) {
-          logger.debug({ userId, durationSecs }, 'Skipping short audio segment');
+          logger.debug(
+            { userId, durationSecs },
+            'Skipping short audio segment',
+          );
           return;
         }
 
@@ -191,7 +198,10 @@ export class DiscordVoiceHandler {
         this.transcribePcm(pcmBuffer)
           .then((text) => {
             if (text && text.trim()) {
-              logger.info({ userId, text: text.slice(0, 100) }, 'Voice transcription');
+              logger.info(
+                { userId, text: text.slice(0, 100) },
+                'Voice transcription',
+              );
               this.onTranscription(userId, guildId, text.trim());
             }
           })
@@ -222,7 +232,9 @@ export class DiscordVoiceHandler {
     return this.transcribeWithWhisper(wavBuffer);
   }
 
-  private async transcribeWithDeepgram(wavBuffer: Buffer): Promise<string | null> {
+  private async transcribeWithDeepgram(
+    wavBuffer: Buffer,
+  ): Promise<string | null> {
     if (!this.deepgram) return null;
 
     try {
@@ -235,15 +247,21 @@ export class DiscordVoiceHandler {
         },
       );
 
-      const transcript = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+      const transcript =
+        result?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
       return transcript || null;
     } catch (err) {
-      logger.error({ err }, 'Deepgram transcription failed, falling back to Whisper');
+      logger.error(
+        { err },
+        'Deepgram transcription failed, falling back to Whisper',
+      );
       return this.transcribeWithWhisper(wavBuffer);
     }
   }
 
-  private async transcribeWithWhisper(wavBuffer: Buffer): Promise<string | null> {
+  private async transcribeWithWhisper(
+    wavBuffer: Buffer,
+  ): Promise<string | null> {
     // Write WAV to temp file, run local Whisper
     const { writeFile, rm } = await import('fs/promises');
     const { tmpdir } = await import('os');
@@ -263,13 +281,11 @@ export class DiscordVoiceHandler {
     if (!state) return;
 
     // Convert MP3 → Opus via ffmpeg for Discord playback
-    const ffmpeg = spawn('ffmpeg', [
-      '-i', 'pipe:0',
-      '-f', 's16le',
-      '-ar', '48000',
-      '-ac', '2',
-      'pipe:1',
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const ffmpeg = spawn(
+      'ffmpeg',
+      ['-i', 'pipe:0', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
 
     const readable = new Readable({
       read() {
@@ -313,7 +329,11 @@ export class DiscordVoiceHandler {
 /**
  * Convert raw PCM buffer to WAV format with proper header.
  */
-function pcmToWav(pcm: Buffer, sampleRate: number, numChannels: number): Buffer {
+function pcmToWav(
+  pcm: Buffer,
+  sampleRate: number,
+  numChannels: number,
+): Buffer {
   const bitsPerSample = 16;
   const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
   const blockAlign = numChannels * (bitsPerSample / 8);
