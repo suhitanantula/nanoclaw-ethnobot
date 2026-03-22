@@ -73,16 +73,26 @@ export const TIMEZONE =
 
 // Whisper transcription (read by channel modules that need it)
 export const WHISPER_ENABLED =
-  (process.env.WHISPER_ENABLED || readEnvFile(['WHISPER_ENABLED']).WHISPER_ENABLED) !== 'false';
+  (process.env.WHISPER_ENABLED ||
+    readEnvFile(['WHISPER_ENABLED']).WHISPER_ENABLED) !== 'false';
 export const WHISPER_MODEL =
-  process.env.WHISPER_MODEL || readEnvFile(['WHISPER_MODEL']).WHISPER_MODEL || 'base';
+  process.env.WHISPER_MODEL ||
+  readEnvFile(['WHISPER_MODEL']).WHISPER_MODEL ||
+  'base';
 
 // Voice (Discord real-time voice channel interaction)
 export const VOICE_ENABLED =
-  (process.env.VOICE_ENABLED || readEnvFile(['VOICE_ENABLED']).VOICE_ENABLED) === 'true';
+  (process.env.VOICE_ENABLED ||
+    readEnvFile(['VOICE_ENABLED']).VOICE_ENABLED) === 'true';
 export const DEEPGRAM_API_KEY =
-  process.env.DEEPGRAM_API_KEY || readEnvFile(['DEEPGRAM_API_KEY']).DEEPGRAM_API_KEY || '';
+  process.env.DEEPGRAM_API_KEY ||
+  readEnvFile(['DEEPGRAM_API_KEY']).DEEPGRAM_API_KEY ||
+  '';
 export const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY || readEnvFile(['OPENAI_API_KEY']).OPENAI_API_KEY || '';
+  process.env.OPENAI_API_KEY ||
+  readEnvFile(['OPENAI_API_KEY']).OPENAI_API_KEY ||
+  '';
 export const VOICE_TTS_VOICE =
-  process.env.VOICE_TTS_VOICE || readEnvFile(['VOICE_TTS_VOICE']).VOICE_TTS_VOICE || 'alloy';
+  process.env.VOICE_TTS_VOICE ||
+  readEnvFile(['VOICE_TTS_VOICE']).VOICE_TTS_VOICE ||
+  'alloy';
