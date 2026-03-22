@@ -25,8 +25,7 @@ const HOME_DIR = process.env.HOME || '/Users/user';
 
 // DATA_ROOT: where store/, groups/, and data/ live.
 // Defaults to project root; override via DATA_ROOT in .env to use external storage.
-const DATA_ROOT =
-  process.env.DATA_ROOT || envConfig.DATA_ROOT || PROJECT_ROOT;
+export const DATA_ROOT = process.env.DATA_ROOT || envConfig.DATA_ROOT || PROJECT_ROOT;
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(

@@ -12,6 +12,7 @@ import {
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
+  DATA_ROOT,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
@@ -191,6 +192,24 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // All groups: read-only view of every other group's folder — enables cross-channel
+  // collaboration. Agents can read /workspace/groups/{channel}/ to see peers' work.
+  mounts.push({
+    hostPath: GROUPS_DIR,
+    containerPath: '/workspace/groups',
+    readonly: true,
+  });
+
+  // Main only: read-only access to DATA_ROOT so agents can reach the database
+  // and data/ dir for group management (store/messages.db, data/registered_groups.json).
+  if (isMain) {
+    mounts.push({
+      hostPath: DATA_ROOT,
+      containerPath: '/workspace/data',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
